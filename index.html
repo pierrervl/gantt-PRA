@@ -133,7 +133,8 @@ body.sidebar-collapsed .sidebar{
 }
 .lrow:hover{background:var(--paper-2)}
 .lrow.sub{padding-left:38px}
-.lrow.action.dragging-row{opacity:.45;background:var(--accent-soft)}
+.lrow.action.dragging-row,.lrow.sub.dragging-row{opacity:.45;background:var(--accent-soft)}
+.lrow.sub.no-drop{cursor:default}
 .lrow.drop-above::before,.lrow.drop-below::after{
   content:"";position:absolute;left:8px;right:8px;height:2px;background:var(--accent);border-radius:1px;z-index:2;
 }
@@ -152,6 +153,33 @@ body.sidebar-collapsed .sidebar{
 .lrow.collapsed .caret svg{transform:rotate(-90deg)}
 .lrow .swatch{width:10px;height:10px;border-radius:3px;flex:0 0 auto}
 .lrow.sub .swatch{border-radius:50%;width:7px;height:7px}
+.status-btn{
+  width:22px;height:22px;flex:0 0 auto;padding:0;border:2px solid var(--muted);
+  border-radius:50%;background:#fff;display:grid;place-items:center;transition:.15s;
+}
+.status-btn:hover{box-shadow:0 0 0 3px var(--paper-2)}
+.status-btn .status-mark{display:block;width:0;height:0}
+.status-btn.st-todo{color:var(--muted)}
+.status-btn.st-in_progress{color:#2563eb;border-color:#2563eb;background:#eff6ff}
+.status-btn.st-in_progress .status-mark{width:8px;height:8px;border-radius:50%;background:currentColor}
+.status-btn.st-late{color:#c2410c;border-color:#c2410c;background:#fff7ed}
+.status-btn.st-late .status-mark{width:auto;height:auto;font-size:13px;font-weight:800;line-height:1}
+.status-btn.st-late .status-mark::before{content:"!"}
+.status-btn.st-done{color:#15803d;border-color:#15803d;background:#f0fdf4}
+.status-btn.st-done .status-mark{width:auto;height:auto;font-size:12px;font-weight:800;line-height:1}
+.status-btn.st-done .status-mark::before{content:"✓"}
+.status-btn.mini{width:18px;height:18px;pointer-events:none;flex-shrink:0}
+.lrow.st-done .name{opacity:.62;text-decoration:line-through;text-decoration-color:rgba(27,28,34,.28)}
+.status-pop{
+  position:fixed;z-index:200;background:#fff;border:1px solid var(--line);
+  border-radius:11px;box-shadow:var(--shadow);padding:6px;min-width:178px;
+}
+.status-pop button{
+  display:flex;align-items:center;gap:10px;width:100%;padding:8px 10px;border:0;
+  background:transparent;border-radius:8px;font-size:13px;font-weight:600;
+  color:var(--ink);text-align:left;cursor:pointer;
+}
+.status-pop button:hover,.status-pop button.on{background:var(--paper-2)}
 .lrow .name{flex:1;min-width:0;font-size:15px;font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:text}
 .lrow.sub .name{font-weight:500;color:var(--ink-soft);font-size:14px}
 .lrow .dates{font-size:11.5px;color:var(--muted);font-weight:500;font-variant-numeric:tabular-nums;flex:0 0 88px;text-align:right}
@@ -287,7 +315,7 @@ svg.deps{position:absolute;top:0;left:0;z-index:3;overflow:visible;pointer-event
   /* fige les volets pour une mise en page statique à l'impression */
   .labels,.corner,.thead,.canvas{position:static!important}
   .labels{border-right:1px solid var(--line)}
-  .lrow .add-sub,.lrow .edit,.lrow .drag-grip,.lfoot,.bar .handle{display:none!important}
+  .lrow .add-sub,.lrow .edit,.lrow .drag-grip,.lrow .status-btn,.lfoot,.bar .handle{display:none!important}
   .lrow:hover{background:transparent}
   .lrow,.bar,.summary,.milestone{break-inside:avoid}
   .bar,.summary,.milestone svg{box-shadow:none!important;filter:none!important}
@@ -338,6 +366,43 @@ const passFilter=t=>!printFilter.active||(printFilter.included&&printFilter.incl
 let dayWidth=30;
 const ROW=42, HEADER=58, LABELW=460;
 const GRIP_SVG=`<svg viewBox="0 0 12 12" fill="currentColor"><circle cx="4" cy="3" r="1"/><circle cx="8" cy="3" r="1"/><circle cx="4" cy="6" r="1"/><circle cx="8" cy="6" r="1"/><circle cx="4" cy="9" r="1"/><circle cx="8" cy="9" r="1"/></svg>`;
+const STATUSES=[
+  {id:"todo",label:"À faire"},
+  {id:"in_progress",label:"En cours"},
+  {id:"late",label:"En retard"},
+  {id:"done",label:"Terminé"}
+];
+const STATUS_IDS=new Set(STATUSES.map(s=>s.id));
+function normStatus(s){return STATUS_IDS.has(s)?s:"todo";}
+function statusOf(t){return normStatus(t.status);}
+function statusLabel(id){return STATUSES.find(s=>s.id===id)?.label||"À faire";}
+function renderStatusBtn(t){
+  const s=statusOf(t),lb=statusLabel(s);
+  return `<button type="button" class="status-btn st-${s}" data-act="status" title="État : ${esc(lb)} — cliquer pour modifier" aria-label="État : ${esc(lb)}"><span class="status-mark"></span></button>`;
+}
+function closeStatusPicker(){document.getElementById("statusPop")?.remove();}
+function openStatusPicker(p,t,anchor){
+  closeStatusPicker();
+  const pop=document.createElement("div");
+  pop.className="status-pop";pop.id="statusPop";
+  pop.innerHTML=STATUSES.map(s=>`<button type="button" data-status="${s.id}" class="${statusOf(t)===s.id?"on":""}">
+    <span class="status-btn st-${s.id} mini"><span class="status-mark"></span></span>${esc(s.label)}</button>`).join("");
+  document.body.appendChild(pop);
+  const r=anchor.getBoundingClientRect(),pw=pop.offsetWidth,ph=pop.offsetHeight;
+  pop.style.left=Math.max(8,Math.min(r.left,window.innerWidth-pw-8))+"px";
+  pop.style.top=Math.min(r.bottom+6,window.innerHeight-ph-8)+"px";
+  pop.querySelectorAll("[data-status]").forEach(btn=>{
+    btn.onclick=e=>{
+      e.stopPropagation();
+      t.status=btn.dataset.status;
+      markDirty(true);closeStatusPicker();render();
+    };
+  });
+  const outside=e=>{
+    if(!pop.contains(e.target)&&!anchor.contains(e.target)){closeStatusPicker();document.removeEventListener("click",outside,true);}
+  };
+  setTimeout(()=>document.addEventListener("click",outside,true),0);
+}
 const collapsed=new Set();
 
 /* ============ Dates (jour entier, sans fuseau) ============ */
@@ -391,6 +456,22 @@ function moveActionGroup(p,dragId,targetActionId,place){
   if(insertAt<0)return;
   if(place==="after")insertAt++;
   const next=[...remaining.slice(0,insertAt),...block,...remaining.slice(insertAt)];
+  const same=next.length===p.tasks.length&&next.every((t,i)=>t.id===p.tasks[i].id);
+  if(same)return;
+  p.tasks=next;
+  markDirty(true);
+  render();
+}
+function moveSubAction(p,dragId,targetSubId,place){
+  const drag=p.tasks.find(t=>t.id===dragId);
+  const target=p.tasks.find(t=>t.id===targetSubId);
+  if(!drag||!target||!drag.parentId||drag.parentId!==target.parentId)return;
+  if(dragId===targetSubId)return;
+  const remaining=p.tasks.filter(t=>t.id!==dragId);
+  let insertAt=remaining.findIndex(t=>t.id===targetSubId);
+  if(insertAt<0)return;
+  if(place==="after")insertAt++;
+  const next=[...remaining.slice(0,insertAt),drag,...remaining.slice(insertAt)];
   const same=next.length===p.tasks.length&&next.every((t,i)=>t.id===p.tasks[i].id);
   if(same)return;
   p.tasks=next;
@@ -541,10 +622,13 @@ function renderMain(){
     const isAction=!t.parentId;const hasKids=isAction&&children(p,t.id).length>0;
     const col=colorOf(p,t);const sp=span(p,t);
     const dateTxt=t.isMilestone?fmtShort(t.start):fmtShort(fromDay(sp.start))+"–"+fmtShort(fromDay(sp.end));
-    labels+=`<div class="lrow ${isAction?"action":"sub"}${collapsed.has(t.id)?" collapsed":""}" data-id="${t.id}">
-      ${isAction?`<button type="button" class="drag-grip" draggable="true" title="Glisser pour réordonner">${GRIP_SVG}</button>
+    const st=statusOf(t);
+    labels+=`<div class="lrow ${isAction?"action":"sub"} st-${st}${collapsed.has(t.id)?" collapsed":""}" data-id="${t.id}"${isAction?"":` data-parent="${t.parentId}"`}>
+      ${isAction?`<button type="button" class="drag-grip" draggable="true" data-drag="action" title="Glisser pour réordonner le groupe">${GRIP_SVG}</button>
       <button type="button" class="caret" data-act="toggle" ${hasKids?"":'style="visibility:hidden"'}>
-        <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 4l4 4 4-4"/></svg></button>`:""}
+        <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 4l4 4 4-4"/></svg></button>`
+      :`<button type="button" class="drag-grip" draggable="true" data-drag="sub" title="Glisser pour réordonner dans le groupe">${GRIP_SVG}</button>`}
+      ${renderStatusBtn(t)}
       <span class="swatch" style="background:${col}"></span>
       <span class="name${t.isMilestone?" ms":""}" data-act="edit">${esc(t.name)}</span>
       ${renderPeople(t.assignees)}
@@ -619,6 +703,7 @@ function renderMain(){
         e.stopPropagation();const act=el.dataset.act;
         if(act==="toggle"){if(collapsed.has(id))collapsed.delete(id);else collapsed.add(id);render();}
         else if(act==="addsub")addTask(p,id);
+        else if(act==="status")openStatusPicker(p,p.tasks.find(t=>t.id===id),el);
         else if(act==="edit")openEditor(p,p.tasks.find(t=>t.id===id));
       });
     });
@@ -628,54 +713,95 @@ function renderMain(){
   enableRowReorder(p);
 }
 
-/* ============ Réordonner les groupes d'actions ============ */
+/* ============ Réordonner actions et sous-actions ============ */
 function enableRowReorder(p){
   const main=$("#main");
-  let dragId=null;
+  let dragId=null,dragKind=null;
+  const payload=id=>`${dragKind||"action"}:${id}`;
+  const parsePayload=raw=>{
+    if(!raw)return null;
+    const i=raw.indexOf(":");
+    if(i<0)return{kind:"action",id:raw};
+    return{kind:raw.slice(0,i),id:raw.slice(i+1)};
+  };
+  const readDrag=e=>{
+    const raw=e.dataTransfer.getData("text/plain")||dragId&&payload(dragId);
+    if(raw&&raw.includes(":"))return parsePayload(raw);
+    if(dragId)return{kind:dragKind||"action",id:dragId};
+    return null;
+  };
   const clearMarks=()=>main.querySelectorAll(".lrow").forEach(r=>{
-    r.classList.remove("dragging-row","drop-above","drop-below");
+    r.classList.remove("dragging-row","drop-above","drop-below","no-drop");
   });
-  main.querySelectorAll(".lrow.action .drag-grip").forEach(grip=>{
+  const markDrop=(row,after)=>{
+    row.classList.toggle("drop-below",after);
+    row.classList.toggle("drop-above",!after);
+    row.classList.remove("no-drop");
+  };
+  main.querySelectorAll(".lrow .drag-grip").forEach(grip=>{
     grip.addEventListener("dragstart",e=>{
       const row=grip.closest(".lrow");
       dragId=row.dataset.id;
+      dragKind=grip.dataset.drag||"action";
       e.dataTransfer.effectAllowed="move";
-      e.dataTransfer.setData("text/plain",dragId);
+      e.dataTransfer.setData("text/plain",payload(dragId));
       row.classList.add("dragging-row");
     });
-    grip.addEventListener("dragend",()=>{dragId=null;clearMarks();});
+    grip.addEventListener("dragend",()=>{dragId=null;dragKind=null;clearMarks();});
     grip.addEventListener("click",e=>e.stopPropagation());
   });
-  const onDragOver=(row,e)=>{
-    const id=e.dataTransfer.getData("text/plain")||dragId;
-    if(!id||row.dataset.id===id)return;
-    e.preventDefault();
-    e.dataTransfer.dropEffect="move";
-    const after=e.clientY>row.getBoundingClientRect().top+row.offsetHeight/2;
-    row.classList.toggle("drop-below",after);
-    row.classList.toggle("drop-above",!after);
-  };
-  const onDrop=(row,e)=>{
-    e.preventDefault();
-    const id=e.dataTransfer.getData("text/plain")||dragId;
-    const targetId=row.dataset.id;
-    if(!id||!targetId||id===targetId)return;
-    const after=e.clientY>row.getBoundingClientRect().top+row.offsetHeight/2;
-    clearMarks();
-    moveActionGroup(p,id,targetId,after?"after":"before");
-  };
+  const dropHalf=(row,e)=>e.clientY>row.getBoundingClientRect().top+row.offsetHeight/2;
   main.querySelectorAll(".lrow.action").forEach(row=>{
-    row.addEventListener("dragover",e=>onDragOver(row,e));
-    row.addEventListener("dragleave",e=>{
-      if(!row.contains(e.relatedTarget))row.classList.remove("drop-above","drop-below");
+    row.addEventListener("dragover",e=>{
+      const d=readDrag(e);
+      if(!d||d.kind!=="action"||row.dataset.id===d.id)return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect="move";
+      markDrop(row,dropHalf(row,e));
     });
-    row.addEventListener("drop",e=>onDrop(row,e));
+    row.addEventListener("dragleave",e=>{
+      if(!row.contains(e.relatedTarget))row.classList.remove("drop-above","drop-below","no-drop");
+    });
+    row.addEventListener("drop",e=>{
+      e.preventDefault();
+      const d=readDrag(e);
+      if(!d||d.kind!=="action"||row.dataset.id===d.id)return;
+      clearMarks();
+      moveActionGroup(p,d.id,row.dataset.id,dropHalf(row,e)?"after":"before");
+    });
+  });
+  main.querySelectorAll(".lrow.sub").forEach(row=>{
+    row.addEventListener("dragover",e=>{
+      const d=readDrag(e);
+      if(!d||d.kind!=="sub"||row.dataset.id===d.id)return;
+      const dragTask=p.tasks.find(t=>t.id===d.id);
+      if(!dragTask||dragTask.parentId!==row.dataset.parent){
+        row.classList.add("no-drop");
+        row.classList.remove("drop-above","drop-below");
+        return;
+      }
+      e.preventDefault();
+      e.dataTransfer.dropEffect="move";
+      markDrop(row,dropHalf(row,e));
+    });
+    row.addEventListener("dragleave",e=>{
+      if(!row.contains(e.relatedTarget))row.classList.remove("drop-above","drop-below","no-drop");
+    });
+    row.addEventListener("drop",e=>{
+      e.preventDefault();
+      const d=readDrag(e);
+      if(!d||d.kind!=="sub"||row.dataset.id===d.id)return;
+      const dragTask=p.tasks.find(t=>t.id===d.id);
+      if(!dragTask||dragTask.parentId!==row.dataset.parent)return;
+      clearMarks();
+      moveSubAction(p,d.id,row.dataset.id,dropHalf(row,e)?"after":"before");
+    });
   });
   const foot=main.querySelector(".lfoot");
   if(foot){
     foot.addEventListener("dragover",e=>{
-      const id=e.dataTransfer.getData("text/plain")||dragId;
-      if(!id)return;
+      const d=readDrag(e);
+      if(!d||d.kind!=="action")return;
       e.preventDefault();
       e.dataTransfer.dropEffect="move";
       foot.classList.add("drop-target");
@@ -683,11 +809,11 @@ function enableRowReorder(p){
     foot.addEventListener("dragleave",()=>foot.classList.remove("drop-target"));
     foot.addEventListener("drop",e=>{
       e.preventDefault();
-      const id=e.dataTransfer.getData("text/plain")||dragId;
+      const d=readDrag(e);
       foot.classList.remove("drop-target");
       const actions=p.tasks.filter(t=>!t.parentId);
       const last=actions[actions.length-1];
-      if(id&&last&&id!==last.id)moveActionGroup(p,id,last.id,"after");
+      if(d&&d.kind==="action"&&last&&d.id!==last.id)moveActionGroup(p,d.id,last.id,"after");
       else clearMarks();
     });
   }
@@ -742,7 +868,7 @@ function enableDrag(p,minDay){
 function addProject(){
   const p={id:uid(),name:"Nouveau projet",tasks:[]};
   state.projects.push(p);state.activeId=p.id;markDirty(true);
-  const a={id:uid(),parentId:null,name:"Première action",start:fromDay(todayDay()),end:fromDay(todayDay()+6),progress:0,isMilestone:false,deps:[]};
+  const a={id:uid(),parentId:null,name:"Première action",start:fromDay(todayDay()),end:fromDay(todayDay()+6),progress:0,isMilestone:false,deps:[],status:"todo"};
   p.tasks.push(a);render();
 }
 function deleteProject(p){
@@ -754,7 +880,7 @@ function deleteProject(p){
 function addTask(p,parentId){
   const base=todayDay();
   const t={id:uid(),parentId:parentId||null,name:parentId?"Nouvelle sous-action":"Nouvelle action",
-    start:fromDay(base),end:fromDay(base+(parentId?3:5)),progress:0,isMilestone:false,deps:[],assignees:[]};
+    start:fromDay(base),end:fromDay(base+(parentId?3:5)),progress:0,isMilestone:false,deps:[],assignees:[],status:"todo"};
   // insère la sous-action juste après les enfants existants
   if(parentId){
     collapsed.delete(parentId);
@@ -786,6 +912,8 @@ function openEditor(p,t){
     <h3>${isAction?"Action":"Sous-action"}</h3>
     <div class="kind">${hasKids?"Les dates et l'avancement sont calculés à partir des sous-actions.":"Tâche planifiée"}</div>
     <div class="field"><label>Nom</label><input type="text" id="f_name" value="${esc(t.name)}" autocomplete="off"></div>
+    <div class="field"><label>État</label>
+      <div class="seg status-seg">${STATUSES.map(s=>`<button type="button" class="st-pick st-${s.id}${statusOf(t)===s.id?" on":""}" data-status="${s.id}">${esc(s.label)}</button>`).join("")}</div></div>
     <div class="field"><label>Type</label>
       <div class="seg"><button id="seg_task" class="${t.isMilestone?"":"on"}" ${hasKids?"disabled style=opacity:.4":""}>Tâche</button>
       <button id="seg_ms" class="${t.isMilestone?"on":""}" ${hasKids?"disabled style=opacity:.4":""}>Jalon ◆</button></div></div>
@@ -809,6 +937,13 @@ function openEditor(p,t){
     </div>`;
   $("#scrim").classList.add("on");
   $("#f_name").focus();$("#f_name").select();
+  let curStatus=statusOf(t);
+  m.querySelectorAll(".st-pick").forEach(btn=>{
+    btn.onclick=()=>{
+      curStatus=btn.dataset.status;
+      m.querySelectorAll(".st-pick").forEach(b=>b.classList.toggle("on",b.dataset.status===curStatus));
+    };
+  });
 
   let ms=t.isMilestone;
   const refreshType=()=>{
@@ -846,6 +981,7 @@ function openEditor(p,t){
   $("#m_del").onclick=()=>deleteTask(p,t);
   $("#m_save").onclick=()=>{
     t.name=$("#f_name").value.trim()||t.name;
+    t.status=curStatus;
     if(!hasKids){
       t.isMilestone=ms;
       t.start=$("#f_start").value||t.start;
@@ -1059,7 +1195,8 @@ function importJSON(file){
         id:t.id||uid(),parentId:t.parentId||null,name:t.name||"Sans nom",
         start:t.start,end:t.end||t.start,progress:t.progress||0,
         isMilestone:!!t.isMilestone,deps:Array.isArray(t.deps)?t.deps:[],
-        assignees:Array.isArray(t.assignees)?t.assignees.filter(x=>typeof x==="string"):[]
+        assignees:Array.isArray(t.assignees)?t.assignees.filter(x=>typeof x==="string"):[],
+        status:normStatus(t.status)
       }));});
       state.projects=projects;
       state.activeId=(data.activeId&&projects.some(p=>p.id===data.activeId))?data.activeId:(projects[0]?projects[0].id:null);
@@ -1137,15 +1274,15 @@ function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",
 /* ============ Jeu de démonstration ============ */
 function seed(){
   const t=todayDay();
-  const mk=(o)=>Object.assign({id:uid(),parentId:null,progress:0,isMilestone:false,deps:[],assignees:[]},o);
-  const a1=mk({name:"Cadrage",start:fromDay(t-2),end:fromDay(t+6),progress:80,assignees:["Alice Martin"]});
-  const a1s1=mk({name:"Entretiens besoins",parentId:a1.id,start:fromDay(t-2),end:fromDay(t+2),progress:100,assignees:["Alice Martin","Karim Benali"]});
-  const a1s2=mk({name:"Cahier des charges",parentId:a1.id,start:fromDay(t+2),end:fromDay(t+6),progress:60,deps:[a1s1.id],assignees:["Alice Martin"]});
-  const j1=mk({name:"Validation cadrage",start:fromDay(t+7),end:fromDay(t+7),isMilestone:true,deps:[a1s2.id],assignees:["Sophie Durand"]});
-  const a2=mk({name:"Conception",start:fromDay(t+8),end:fromDay(t+20),progress:25});
-  const a2s1=mk({name:"Maquettes",parentId:a2.id,start:fromDay(t+8),end:fromDay(t+14),progress:50,deps:[j1.id],assignees:["Léa Petit"]});
-  const a2s2=mk({name:"Architecture technique",parentId:a2.id,start:fromDay(t+12),end:fromDay(t+20),progress:0,deps:[a2s1.id],assignees:["Karim Benali","Tom Roy"]});
-  const a3=mk({name:"Réalisation",start:fromDay(t+21),end:fromDay(t+40),progress:0,deps:[a2.id],assignees:["Tom Roy","Karim Benali","Léa Petit","Alice Martin"]});
+  const mk=(o)=>Object.assign({id:uid(),parentId:null,progress:0,isMilestone:false,deps:[],assignees:[],status:"todo"},o);
+  const a1=mk({name:"Cadrage",start:fromDay(t-2),end:fromDay(t+6),progress:80,status:"in_progress",assignees:["Alice Martin"]});
+  const a1s1=mk({name:"Entretiens besoins",parentId:a1.id,start:fromDay(t-2),end:fromDay(t+2),progress:100,status:"done",assignees:["Alice Martin","Karim Benali"]});
+  const a1s2=mk({name:"Cahier des charges",parentId:a1.id,start:fromDay(t+2),end:fromDay(t+6),progress:60,status:"in_progress",assignees:["Alice Martin"]});
+  const j1=mk({name:"Validation cadrage",start:fromDay(t+7),end:fromDay(t+7),isMilestone:true,status:"todo",deps:[a1s2.id],assignees:["Sophie Durand"]});
+  const a2=mk({name:"Conception",start:fromDay(t+8),end:fromDay(t+20),progress:25,status:"in_progress"});
+  const a2s1=mk({name:"Maquettes",parentId:a2.id,start:fromDay(t+8),end:fromDay(t+14),progress:50,status:"in_progress",deps:[j1.id],assignees:["Léa Petit"]});
+  const a2s2=mk({name:"Architecture technique",parentId:a2.id,start:fromDay(t+12),end:fromDay(t+20),progress:0,status:"late",deps:[a2s1.id],assignees:["Karim Benali","Tom Roy"]});
+  const a3=mk({name:"Réalisation",start:fromDay(t+21),end:fromDay(t+40),progress:0,status:"todo",deps:[a2.id],assignees:["Tom Roy","Karim Benali","Léa Petit","Alice Martin"]});
   const p={id:uid(),name:"Refonte du site",tasks:[a1,a1s1,a1s2,j1,a2,a2s1,a2s2,a3]};
   const p2={id:uid(),name:"Lancement produit",tasks:[
     mk({name:"Stratégie marketing",start:fromDay(t),end:fromDay(t+10),progress:40,assignees:["Sophie Durand"]}),
@@ -1189,7 +1326,9 @@ $("#importBtn").onclick=()=>importFromDisk();
 $("#fileInput").onchange=e=>{if(e.target.files[0])importJSON(e.target.files[0]);e.target.value="";};
 loadDirHandle().then(h=>{if(h)dataDirHandle=h;updateFolderHint();});
 $("#scrim").addEventListener("click",e=>{if(e.target.id==="scrim")closeModal();});
-document.addEventListener("keydown",e=>{if(e.key==="Escape")closeModal();});
+document.addEventListener("keydown",e=>{
+  if(e.key==="Escape"){closeStatusPicker();closeModal();}
+});
 window.addEventListener("beforeunload",e=>{if(dirty){e.preventDefault();e.returnValue="";}});
 
 seed();
