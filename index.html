@@ -73,6 +73,15 @@ button{font-family:inherit;cursor:pointer}
 .dirty{display:flex;align-items:center;gap:7px;font-size:11.5px;color:#b9b3a7;padding:6px 8px 0}
 .dirty .pip{width:7px;height:7px;border-radius:50%;background:#5fae6b}
 .dirty.on .pip{background:#e0a23a;box-shadow:0 0 0 3px rgba(224,162,58,.18)}
+.folder-hint{
+  font-size:11px;color:#7e7a70;padding:4px 8px 0;line-height:1.35;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.folder-hint button{
+  border:0;background:none;color:#b9b3a7;font:inherit;font-size:11px;
+  text-decoration:underline;cursor:pointer;padding:0;margin-left:4px;
+}
+.folder-hint button:hover{color:#e9e6df}
 
 /* ---------- Main ---------- */
 .main{flex:1;display:flex;flex-direction:column;min-width:0}
@@ -303,6 +312,7 @@ svg.deps{position:absolute;top:0;left:0;z-index:3;overflow:visible;pointer-event
       </button>
     </div>
     <div class="dirty" id="dirty"><span class="pip"></span><span id="dirtyTxt">Tout est exporté</span></div>
+    <div class="folder-hint" id="folderHint" hidden></div>
   </div>
   <input type="file" id="fileInput" accept="application/json,.json" hidden>
 </aside>
@@ -441,7 +451,7 @@ function renderMain(){
         <button class="tool primary" id="e_new">Créer un projet</button>
         <button class="tool" id="e_imp">Importer un JSON</button>
       </div></div></div>`;
-    $("#e_new").onclick=addProject;$("#e_imp").onclick=()=>$("#fileInput").click();
+    $("#e_new").onclick=addProject;$("#e_imp").onclick=()=>importFromDisk();
     return;
   }
   const b=projBounds(p);const totalDays=b.max-b.min+1;const today=todayDay();
@@ -912,13 +922,116 @@ window.addEventListener("afterprint",()=>{
   if(printFilter.active){printFilter.active=false;printFilter.included=null;render();}
 });
 
-/* ============ Export / Import ============ */
-function exportJSON(){
-  const data={version:1,exportedAt:new Date().toISOString(),activeId:state.activeId,projects:state.projects};
-  const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
+/* ============ Export / Import (dossier mémorisé) ============ */
+const FS_DB="gantt-atelier-fs",FS_STORE="handles",FS_DIR_KEY="dataDir";
+let dataDirHandle=null;
+const fsDirSupported=()=>typeof window.showDirectoryPicker==="function";
+
+function exportFilename(){
+  const d=new Date(),p=n=>String(n).padStart(2,"0");
+  return `gantt-${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}_${p(d.getHours())}-${p(d.getMinutes())}-${p(d.getSeconds())}.json`;
+}
+function openFSDB(){
+  return new Promise((ok,no)=>{
+    const r=indexedDB.open(FS_DB,1);
+    r.onupgradeneeded=()=>r.result.createObjectStore(FS_STORE);
+    r.onsuccess=()=>ok(r.result);
+    r.onerror=()=>no(r.error);
+  });
+}
+async function saveDirHandle(h){
+  const db=await openFSDB();
+  return new Promise((ok,no)=>{
+    const tx=db.transaction(FS_STORE,"readwrite");
+    tx.objectStore(FS_STORE).put(h,FS_DIR_KEY);
+    tx.oncomplete=ok;tx.onerror=()=>no(tx.error);
+  });
+}
+async function loadDirHandle(){
+  try{
+    const db=await openFSDB();
+    return new Promise((ok,no)=>{
+      const tx=db.transaction(FS_STORE,"readonly");
+      const req=tx.objectStore(FS_STORE).get(FS_DIR_KEY);
+      req.onsuccess=()=>ok(req.result||null);
+      req.onerror=()=>no(req.error);
+    });
+  }catch{return null;}
+}
+async function verifyDirAccess(h,mode="readwrite"){
+  if(!h)return false;
+  let perm=await h.queryPermission({mode});
+  if(perm==="granted")return true;
+  if(perm==="prompt")perm=await h.requestPermission({mode});
+  return perm==="granted";
+}
+function updateFolderHint(){
+  const el=$("#folderHint");
+  if(!el)return;
+  if(dataDirHandle&&fsDirSupported()){
+    el.hidden=false;
+    el.innerHTML=`Dossier : <span title="${esc(dataDirHandle.name)}">${esc(dataDirHandle.name)}</span>
+      <button type="button" id="changeFolderBtn">Changer</button>`;
+    $("#changeFolderBtn").onclick=()=>pickDataFolder(true);
+  }else if(fsDirSupported()){
+    el.hidden=false;
+    el.textContent="Le dossier sera mémorisé au premier export ou import.";
+  }else{
+    el.hidden=false;
+    el.textContent="Dossier non mémorisé (utilisez Chrome ou Edge).";
+  }
+}
+async function pickDataFolder(force){
+  if(!fsDirSupported())return null;
+  try{
+    const h=await window.showDirectoryPicker({
+      mode:"readwrite",
+      id:"gantt-atelier-data",
+      startIn:dataDirHandle||"documents"
+    });
+    dataDirHandle=h;
+    await saveDirHandle(h);
+    updateFolderHint();
+    return h;
+  }catch(e){
+    if(e.name!=="AbortError"&&!force)alert("Impossible d’accéder au dossier : "+e.message);
+    return null;
+  }
+}
+async function ensureDataDir(){
+  if(!fsDirSupported())return null;
+  if(!dataDirHandle)dataDirHandle=await loadDirHandle();
+  if(dataDirHandle&&await verifyDirAccess(dataDirHandle))return dataDirHandle;
+  return pickDataFolder(false);
+}
+function exportPayload(){
+  return JSON.stringify({version:1,exportedAt:new Date().toISOString(),activeId:state.activeId,projects:state.projects},null,2);
+}
+function downloadJSON(json,name){
+  const blob=new Blob([json],{type:"application/json"});
   const url=URL.createObjectURL(blob);const a=document.createElement("a");
-  const stamp=new Date().toISOString().slice(0,10);
-  a.href=url;a.download=`gantt-${stamp}.json`;a.click();URL.revokeObjectURL(url);
+  a.href=url;a.download=name;a.click();URL.revokeObjectURL(url);
+}
+async function exportJSON(){
+  const json=exportPayload();
+  const name=exportFilename();
+  if(fsDirSupported()){
+    try{
+      const dir=await ensureDataDir();
+      if(dir){
+        const fh=await dir.getFileHandle(name,{create:true});
+        const w=await fh.createWritable();
+        await w.write(json);
+        await w.close();
+        markDirty(false);
+        return;
+      }
+    }catch(e){
+      if(e.name==="AbortError")return;
+      console.warn(e);
+    }
+  }
+  downloadJSON(json,name);
   markDirty(false);
 }
 function importJSON(file){
@@ -928,7 +1041,6 @@ function importJSON(file){
       const data=JSON.parse(rd.result);
       const projects=Array.isArray(data)?data:data.projects;
       if(!Array.isArray(projects))throw 0;
-      // normalisation
       projects.forEach(p=>{p.id=p.id||uid();p.tasks=(p.tasks||[]).map(t=>({
         id:t.id||uid(),parentId:t.parentId||null,name:t.name||"Sans nom",
         start:t.start,end:t.end||t.start,progress:t.progress||0,
@@ -938,9 +1050,28 @@ function importJSON(file){
       state.projects=projects;
       state.activeId=(data.activeId&&projects.some(p=>p.id===data.activeId))?data.activeId:(projects[0]?projects[0].id:null);
       collapsed.clear();markDirty(false);render();
-    }catch(err){alert("Fichier JSON invalide ou illisible.");}
+    }catch{alert("Fichier JSON invalide ou illisible.");}
   };
   rd.readAsText(file);
+}
+async function importFromDisk(){
+  if(fsDirSupported()&&window.showOpenFilePicker){
+    try{
+      const dir=await ensureDataDir();
+      const opts={
+        multiple:false,
+        types:[{description:"Sauvegarde Gantt",accept:{"application/json":[".json"]}}]
+      };
+      if(dir)opts.startIn=dir;
+      const [fh]=await window.showOpenFilePicker(opts);
+      importJSON(await fh.getFile());
+      return;
+    }catch(e){
+      if(e.name==="AbortError")return;
+      console.warn(e);
+    }
+  }
+  $("#fileInput").click();
 }
 
 /* ============ Échappement HTML ============ */
@@ -969,9 +1100,10 @@ function seed(){
 
 /* ============ Init ============ */
 $("#addProj").onclick=addProject;
-$("#exportBtn").onclick=exportJSON;
-$("#importBtn").onclick=()=>$("#fileInput").click();
+$("#exportBtn").onclick=()=>exportJSON();
+$("#importBtn").onclick=()=>importFromDisk();
 $("#fileInput").onchange=e=>{if(e.target.files[0])importJSON(e.target.files[0]);e.target.value="";};
+loadDirHandle().then(h=>{if(h)dataDirHandle=h;updateFolderHint();});
 $("#scrim").addEventListener("click",e=>{if(e.target.id==="scrim")closeModal();});
 document.addEventListener("keydown",e=>{if(e.key==="Escape")closeModal();});
 window.addEventListener("beforeunload",e=>{if(dirty){e.preventDefault();e.returnValue="";}});
