@@ -23,7 +23,7 @@
   --shadow:0 1px 2px rgba(27,28,34,.06),0 8px 24px rgba(27,28,34,.07);
   --row:42px;
   --header-h:58px;
-  --label-w:330px;
+  --label-w:460px;
   --print-scale:1;
 }
 *{box-sizing:border-box}
@@ -113,26 +113,40 @@ button{font-family:inherit;cursor:pointer}
 .corner span{font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--muted);font-weight:700}
 
 .lrow{
-  height:var(--row);display:flex;align-items:center;gap:7px;padding:0 12px 0 12px;
+  height:var(--row);display:flex;align-items:center;gap:8px;padding:0 14px 0 10px;
   border-bottom:1px solid var(--line-soft);position:relative;
 }
 .lrow:hover{background:var(--paper-2)}
-.lrow.sub{padding-left:30px}
+.lrow.sub{padding-left:38px}
+.lrow.action.dragging-row{opacity:.45;background:var(--accent-soft)}
+.lrow.drop-above::before,.lrow.drop-below::after{
+  content:"";position:absolute;left:8px;right:8px;height:2px;background:var(--accent);border-radius:1px;z-index:2;
+}
+.lrow.drop-above::before{top:-1px}
+.lrow.drop-below::after{bottom:-1px}
+.lrow .drag-grip{
+  width:18px;height:18px;flex:0 0 auto;border:0;background:transparent;color:var(--muted);
+  display:grid;place-items:center;border-radius:5px;cursor:grab;padding:0;
+}
+.lrow .drag-grip:hover{background:#e3dccc;color:var(--ink)}
+.lrow .drag-grip:active{cursor:grabbing}
+.lrow.dragging-row .drag-grip{cursor:grabbing}
 .lrow .caret{width:16px;height:16px;flex:0 0 auto;border:0;background:transparent;color:var(--muted);display:grid;place-items:center;border-radius:4px}
 .lrow .caret:hover{background:#e3dccc;color:var(--ink)}
 .lrow .caret svg{width:11px;height:11px;transition:transform .15s}
 .lrow.collapsed .caret svg{transform:rotate(-90deg)}
 .lrow .swatch{width:10px;height:10px;border-radius:3px;flex:0 0 auto}
 .lrow.sub .swatch{border-radius:50%;width:7px;height:7px}
-.lrow .name{flex:1;font-size:13.5px;font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:text}
-.lrow.sub .name{font-weight:500;color:var(--ink-soft);font-size:13px}
+.lrow .name{flex:1;min-width:0;font-size:15px;font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:text}
+.lrow.sub .name{font-weight:500;color:var(--ink-soft);font-size:14px}
+.lrow .dates{font-size:11.5px;color:var(--muted);font-weight:500;font-variant-numeric:tabular-nums;flex:0 0 88px;text-align:right}
 .lrow .name.ms::after{content:"◆";color:var(--accent);margin-left:6px;font-size:10px}
-.lrow .dates{font-size:11px;color:var(--muted);font-weight:500;font-variant-numeric:tabular-nums;flex:0 0 auto}
 .lrow .add-sub,.lrow .edit{opacity:0;width:22px;height:22px;border:0;background:transparent;border-radius:6px;color:var(--muted);display:grid;place-items:center;flex:0 0 auto}
 .lrow:hover .add-sub,.lrow:hover .edit{opacity:1}
 .lrow .add-sub:hover,.lrow .edit:hover{background:#e3dccc;color:var(--ink)}
 .lrow .add-sub svg,.lrow .edit svg{width:14px;height:14px}
 .lfoot{padding:11px 12px}
+.lfoot.drop-target{outline:2px dashed var(--accent);outline-offset:-4px;border-radius:8px;background:var(--accent-soft)}
 .add-action{
   display:inline-flex;align-items:center;gap:7px;border:1px dashed #c9c0ac;background:transparent;
   color:var(--ink-soft);font-weight:600;font-size:13px;padding:8px 13px;border-radius:9px;width:100%;justify-content:center;transition:.15s;
@@ -258,7 +272,7 @@ svg.deps{position:absolute;top:0;left:0;z-index:3;overflow:visible;pointer-event
   /* fige les volets pour une mise en page statique à l'impression */
   .labels,.corner,.thead,.canvas{position:static!important}
   .labels{border-right:1px solid var(--line)}
-  .lrow .add-sub,.lrow .edit,.lfoot,.bar .handle{display:none!important}
+  .lrow .add-sub,.lrow .edit,.lrow .drag-grip,.lfoot,.bar .handle{display:none!important}
   .lrow:hover{background:transparent}
   .lrow,.bar,.summary,.milestone{break-inside:avoid}
   .bar,.summary,.milestone svg{box-shadow:none!important;filter:none!important}
@@ -306,7 +320,8 @@ let dirty=false;
 const printFilter={active:false,from:null,to:null,included:null};
 const passFilter=t=>!printFilter.active||(printFilter.included&&printFilter.included.has(t.id));
 let dayWidth=30;
-const ROW=42, HEADER=58, LABELW=330;
+const ROW=42, HEADER=58, LABELW=460;
+const GRIP_SVG=`<svg viewBox="0 0 12 12" fill="currentColor"><circle cx="4" cy="3" r="1"/><circle cx="8" cy="3" r="1"/><circle cx="4" cy="6" r="1"/><circle cx="8" cy="6" r="1"/><circle cx="4" cy="9" r="1"/><circle cx="8" cy="9" r="1"/></svg>`;
 const collapsed=new Set();
 
 /* ============ Dates (jour entier, sans fuseau) ============ */
@@ -342,6 +357,29 @@ function orderedTasks(p){
     if(show) p.tasks.filter(t=>t.parentId===a.id&&passFilter(t)).forEach(s=>out.push(s));
   });
   return out;
+}
+function actionBlock(p,actionId){
+  const action=p.tasks.find(t=>t.id===actionId);
+  if(!action||action.parentId)return[];
+  const block=[action];
+  p.tasks.forEach(t=>{if(t.parentId===actionId)block.push(t);});
+  return block;
+}
+function moveActionGroup(p,dragId,targetActionId,place){
+  if(!dragId||!targetActionId||dragId===targetActionId)return;
+  const block=actionBlock(p,dragId);
+  if(!block.length)return;
+  const blockIds=new Set(block.map(t=>t.id));
+  const remaining=p.tasks.filter(t=>!blockIds.has(t.id));
+  let insertAt=remaining.findIndex(t=>t.id===targetActionId);
+  if(insertAt<0)return;
+  if(place==="after")insertAt++;
+  const next=[...remaining.slice(0,insertAt),...block,...remaining.slice(insertAt)];
+  const same=next.length===p.tasks.length&&next.every((t,i)=>t.id===p.tasks[i].id);
+  if(same)return;
+  p.tasks=next;
+  markDirty(true);
+  render();
 }
 function children(p,id){return p.tasks.filter(t=>t.parentId===id&&passFilter(t));}
 function colorOf(p,t){
@@ -484,7 +522,8 @@ function renderMain(){
     const col=colorOf(p,t);const sp=span(p,t);
     const dateTxt=t.isMilestone?fmtShort(t.start):fmtShort(fromDay(sp.start))+"–"+fmtShort(fromDay(sp.end));
     labels+=`<div class="lrow ${isAction?"action":"sub"}${collapsed.has(t.id)?" collapsed":""}" data-id="${t.id}">
-      ${isAction?`<button class="caret" data-act="toggle" ${hasKids?"":'style="visibility:hidden"'}>
+      ${isAction?`<button type="button" class="drag-grip" draggable="true" title="Glisser pour réordonner">${GRIP_SVG}</button>
+      <button type="button" class="caret" data-act="toggle" ${hasKids?"":'style="visibility:hidden"'}>
         <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 4l4 4 4-4"/></svg></button>`:""}
       <span class="swatch" style="background:${col}"></span>
       <span class="name${t.isMilestone?" ms":""}" data-act="edit">${esc(t.name)}</span>
@@ -562,6 +601,72 @@ function renderMain(){
   });
 
   enableDrag(p,b.min);
+  enableRowReorder(p);
+}
+
+/* ============ Réordonner les groupes d'actions ============ */
+function enableRowReorder(p){
+  const main=$("#main");
+  let dragId=null;
+  const clearMarks=()=>main.querySelectorAll(".lrow").forEach(r=>{
+    r.classList.remove("dragging-row","drop-above","drop-below");
+  });
+  main.querySelectorAll(".lrow.action .drag-grip").forEach(grip=>{
+    grip.addEventListener("dragstart",e=>{
+      const row=grip.closest(".lrow");
+      dragId=row.dataset.id;
+      e.dataTransfer.effectAllowed="move";
+      e.dataTransfer.setData("text/plain",dragId);
+      row.classList.add("dragging-row");
+    });
+    grip.addEventListener("dragend",()=>{dragId=null;clearMarks();});
+    grip.addEventListener("click",e=>e.stopPropagation());
+  });
+  const onDragOver=(row,e)=>{
+    const id=e.dataTransfer.getData("text/plain")||dragId;
+    if(!id||row.dataset.id===id)return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect="move";
+    const after=e.clientY>row.getBoundingClientRect().top+row.offsetHeight/2;
+    row.classList.toggle("drop-below",after);
+    row.classList.toggle("drop-above",!after);
+  };
+  const onDrop=(row,e)=>{
+    e.preventDefault();
+    const id=e.dataTransfer.getData("text/plain")||dragId;
+    const targetId=row.dataset.id;
+    if(!id||!targetId||id===targetId)return;
+    const after=e.clientY>row.getBoundingClientRect().top+row.offsetHeight/2;
+    clearMarks();
+    moveActionGroup(p,id,targetId,after?"after":"before");
+  };
+  main.querySelectorAll(".lrow.action").forEach(row=>{
+    row.addEventListener("dragover",e=>onDragOver(row,e));
+    row.addEventListener("dragleave",e=>{
+      if(!row.contains(e.relatedTarget))row.classList.remove("drop-above","drop-below");
+    });
+    row.addEventListener("drop",e=>onDrop(row,e));
+  });
+  const foot=main.querySelector(".lfoot");
+  if(foot){
+    foot.addEventListener("dragover",e=>{
+      const id=e.dataTransfer.getData("text/plain")||dragId;
+      if(!id)return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect="move";
+      foot.classList.add("drop-target");
+    });
+    foot.addEventListener("dragleave",()=>foot.classList.remove("drop-target"));
+    foot.addEventListener("drop",e=>{
+      e.preventDefault();
+      const id=e.dataTransfer.getData("text/plain")||dragId;
+      foot.classList.remove("drop-target");
+      const actions=p.tasks.filter(t=>!t.parentId);
+      const last=actions[actions.length-1];
+      if(id&&last&&id!==last.id)moveActionGroup(p,id,last.id,"after");
+      else clearMarks();
+    });
+  }
 }
 
 /* ============ Glisser-déposer ============ */
