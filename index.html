@@ -1329,7 +1329,14 @@ $("#scrim").addEventListener("click",e=>{if(e.target.id==="scrim")closeModal();}
 document.addEventListener("keydown",e=>{
   if(e.key==="Escape"){closeStatusPicker();closeModal();}
 });
-window.addEventListener("beforeunload",e=>{if(dirty){e.preventDefault();e.returnValue="";}});
+const LEAVE_WARN_MSG="Vous avez des modifications non exportées. Exportez votre planning avant de quitter.";
+window.addEventListener("beforeunload",e=>{
+  if(!dirty)return;
+  e.preventDefault();
+  // Les navigateurs affichent un texte générique, mais ce returnValue est requis.
+  e.returnValue=LEAVE_WARN_MSG;
+  return LEAVE_WARN_MSG;
+});
 
 seed();
 markDirty(false);
